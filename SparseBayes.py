@@ -31,7 +31,13 @@ class SparseBayes(object):
         self.ACTION_ALIGNMENT_SKIP = 12
 
     def preprocess(self,BASIS):
-        N,M = BASIS.shape
+        try:
+            N,M = BASIS.shape
+        except:
+#            self.appLogger.info('Error BASIS:\n %s'%str(BASIS))
+#            print 'Error BASIS:\n %s'%str(BASIS)
+            raise RuntimeError      
+#        N,M = BASIS.shape
         Scales = np.atleast_2d(np.sqrt((BASIS**2).sum(axis=0))).T
         Scales[Scales==0] = 1
         
@@ -108,7 +114,10 @@ class SparseBayes(object):
         dataLikely = (N*np.log(beta) - beta*ED)/2
         
         # log marginal likelihood
-        logdetHOver2 = np.atleast_2d(np.sum(np.log(np.diag(U)))).T
+#        logdetHOver2 = np.atleast_2d(np.sum(np.log(np.diag(U)))).T
+#C
+        logdetHOver2 = np.sum(np.log(np.diag(U)))
+#C        
         logML = dataLikely - np.dot((Mu**2).T,Alpha)/2 + np.sum(np.log(Alpha))/2 - logdetHOver2
         
         # well-determinedness factors
@@ -165,7 +174,10 @@ class SparseBayes(object):
 #            print UsedFactor
             
             # re-estimation: must be a positive 'factor' and already in the model
-            iu = np.ravel(UsedFactor > self.CONTROL_ZeroFactor)
+#C
+            iu = (UsedFactor.ravel() > self.CONTROL_ZeroFactor)
+#C
+#            iu = np.ravel(UsedFactor > self.CONTROL_ZeroFactor)
 #            print self.CONTROL_ZeroFactor
 #            print iu
             index = Used[iu]
@@ -183,20 +195,30 @@ class SparseBayes(object):
             any_to_delete = True if len(index) > 0 else False
             if any_to_delete:
                 # quick computation of change in log-likelihood given all deletions
-                DeltaML[index] = -(Q_out[index]**2/(S_out[index] - Alpha[iu]) - np.log(1 + S_out[index] / Alpha[iu]))/2
+#                DeltaML[index] = -(Q_out[index]**2/(S_out[index] - Alpha[iu]) - np.log(1 + S_out[index] / Alpha[iu]))/2
+                DeltaML[index] = -(Q_out[index]**2/(S_out[index] + Alpha[iu]) - np.log(1 + S_out[index]/Alpha[iu]))/2
                 Action[index] = self.ACTION_DELETE
             
             # addition: must be a positive factor and out of the model
 #            GoodFactor = (Factor > self.CONTROL_ZeroFactor).copy()
             GoodFactor = Factor > self.CONTROL_ZeroFactor
-            GoodFactor[Used] = 0
+#            GoodFactor[Used] = 0
+#C
+            GoodFactor[Used] = False
+#C
             if self.CONTROL_BasisAlignmentTest:
                 try:
-                    GoodFactor[Aligned_out] = 0
+#                    GoodFactor[Aligned_out] = 0
+#C
+                    GoodFactor[Aligned_out] = False
+#C
                 except IndexError:
                     pass
             index = GoodFactor.nonzero()
-            any_to_add = True if len(index) > 0 else False
+#C
+            any_to_add = True if len(index[0]) > 0 else False
+#C
+#            any_to_add = True if len(index) > 0 else False
             if any_to_add:
                 # quick computation of change in log-likelihood given all additions
                 quot = Q_in[index]**2/S_in[index]
@@ -229,8 +251,9 @@ class SparseBayes(object):
             # need to note if basis nu is already in the model, and if so,
             # find its interior index, denoted by "j"
             if selected_Action == self.ACTION_REESTIMATE or selected_Action == self.ACTION_DELETE:
-                j = (Used==nu).nonzero()
-                j = j[0] if len(j) < 2 else j
+                j = (Used==nu).nonzero()[0]
+#                j = (Used==nu).nonzero()
+#                j = j[0] if len(j) < 2 else j
 #                print j
                 
             
@@ -252,23 +275,62 @@ class SparseBayes(object):
                 if selected_Action == self.ACTION_ADD:
                     # rule out addition if the new basis vector is aligned too closely to
                     # one or more already in the model
+#                    print 'Phi %s'%str(Phi)
+#                    print 'PHI %s'%str(PHI)
                     p = np.dot(Phi.T,PHI)
-                    find_Aligned = (p > self.CONTROL_AlignmentMax).nonzero()
+#                    print 'p %s'%str(p)
+                    find_Aligned = (p.ravel() > self.CONTROL_AlignmentMax).nonzero()
+ #                   print 'find_Aligned %s'%str(find_Aligned)
                     num_Aligned = find_Aligned[0].size
+ #                   print 'num_Aligned %d'%num_Aligned
                     if num_Aligned > 0:
                         # the added basis function is effectively indistinguishable from one present already
                         selected_Action = self.ACTION_ALIGNMENT_SKIP
+                        act_ = 'alignment-deferred addition'
                         align_defer_count += 1
-                        Aligned_out = np.vstack((Aligned_out,np.dot(nu,np.ones((num_Aligned,1)))))
-                        Aligned_in = np.vstack((Aligned_in,Used[find_Aligned]))
-            if selected_Action == self.ACTION_DELETE:
-                # reinstate any previously deferred basis functions resulting from this basis function
-                find_Aligned = (Aligned_in == nu).nonzero()
-                num_Aligned = find_Aligned[0].size
-                if num_Aligned > 0:
-                    reinstated = Aligned_out(find_Aligned)
-                    Aligned_in[find_Aligned] = np.array([])
-                    Aligned_out[find_Aligned] = np.array([])
+#                        print 'Aligned_out %s'%str(Aligned_out)
+#                        print 'nu %s'%str(nu)
+#                        print 'num_Aligned %d'%num_Aligned
+#                        print 'dot %s'%str(nu.repeat(num_Aligned))
+#                        Aligned_out = np.concatenate((Aligned_out,np.dot(nu,np.ones((num_Aligned,1)))))
+                        Aligned_out = np.concatenate((Aligned_out,nu.repeat(num_Aligned))).astype('int')
+#                        print 'Aligned_out %s'%str(Aligned_out)
+#                        print 'Used[find_Aligned] %s'%str(Used[find_Aligned])
+                        Aligned_in = np.concatenate((Aligned_in,Used[find_Aligned])).astype('int')
+#                        print 'Aligned_in %s'%str(Aligned_in)
+                if selected_Action == self.ACTION_DELETE:
+                    # reinstate any previously deferred basis functions resulting from this basis function
+                    find_Aligned = (Aligned_in == nu).nonzero()
+                    num_Aligned = find_Aligned[0].size
+                    if num_Aligned > 0:
+#                        print 'del Aligned_out %s'%str(Aligned_out)
+#                        print 'del find_Aligned %s'%str(find_Aligned)
+                        reinstated = Aligned_out[find_Aligned]
+                        Aligned_in = np.delete(Aligned_in,find_Aligned)
+                        Aligned_out = np.delete(Aligned_out,find_Aligned)
+#                        print 'del Aligned_out %s'%str(Aligned_out)
+#                        print 'del Aligned_in %s'%str(Aligned_in)
+#            if self.CONTROL_BasisAlignmentTest:
+#                if selected_Action == self.ACTION_ADD:
+#                    # rule out addition if the new basis vector is aligned too closely to
+#                    # one or more already in the model
+#                    p = np.dot(Phi.T,PHI)
+#                    find_Aligned = (p > self.CONTROL_AlignmentMax).nonzero()
+#                    num_Aligned = find_Aligned[0].size
+#                    if num_Aligned > 0:
+#                        # the added basis function is effectively indistinguishable from one present already
+#                        selected_Action = self.ACTION_ALIGNMENT_SKIP
+#                        align_defer_count += 1
+#                        Aligned_out = np.vstack((Aligned_out,np.dot(nu,np.ones((num_Aligned,1)))))
+#                        Aligned_in = np.vstack((Aligned_in,Used[find_Aligned]))
+#            if selected_Action == self.ACTION_DELETE:
+#                # reinstate any previously deferred basis functions resulting from this basis function
+#                find_Aligned = (Aligned_in == nu).nonzero()
+#                num_Aligned = find_Aligned[0].size
+#                if num_Aligned > 0:
+#                    reinstated = Aligned_out(find_Aligned)
+#                    Aligned_in[find_Aligned] = np.array([])
+#                    Aligned_out[find_Aligned] = np.array([])
             
             # action phase
             # note if we've made a change which necessitates later updating of the statistics
@@ -376,33 +438,48 @@ class SparseBayes(object):
                 SIGMA = SIGMANEW
                 Gamma = 1 - np.ravel(Alpha) * np.diag(SIGMA)
                 BASIS_B_PHI = beta * BASIS_PHI
-            
-            logML = logML + delta_log_marginal
+                
+                logML += delta_log_marginal
+#            logML = logML + delta_log_marginal
             
             # Gaussian noise estimate
-            betaZ1 = beta
-            y = np.dot(PHI,Mu)
-            e = Targets - y
-            if not np.dot(e.T,e) == 0:
-                beta = (N - np.sum(Gamma))/np.dot(e.T,e)
-                # work-around zero-noise issue
-                beta = np.min(np.vstack((beta,self.CONTROL_BetaMaxFactor/np.var(Targets))))
-            else:
-                beta = self.CONTROL_BetaMaxFactor
-
-            delta_log_beta = np.log(beta) - np.log(betaZ1)
-            
-            if np.abs(delta_log_beta) > self.CONTROL_MinDeltaLogBeta:
-                print 'Update beta'
-#                print BASIS,PHI,Targets,Used,Alpha,beta,Mu,BASIS_PHI,BASIS_Targets
-                SIGMA,Mu,S_in,Q_in,S_out,Q_out,Factor,logML,Gamma,BASIS_B_PHI,beta = \
-                self.full_statistics(BASIS,PHI,Targets,Used,Alpha,beta,BASIS_PHI,BASIS_Targets)
-                full_count += 1
-#                print SIGMA,Mu,S_in,Q_in,S_out,Q_out,Factor,logML,Gamma,BASIS_B_PHI,beta
-#                print beta
-#                print Factor
-                if selected_Action == self.ACTION_TERMINATE:
-                    selected_Action = self.ACTION_NOISE_ONLY
+            if selected_Action == self.ACTION_TERMINATE or \
+            i <= self.CONTROL_BetaUpdateStart or \
+            i % self.CONTROL_BetaUpdateFrequency == 0:
+                betaZ1 = beta
+                y = np.dot(PHI,Mu)
+                e = Targets - y
+#                if not np.dot(e.T,e) == 0:
+#                    beta = (N - np.sum(Gamma))/np.dot(e.T,e)
+#    #                if np.var(Targets) > 0:
+#    #                    beta = np.min(np.vstack((beta,self.CONTROL_BetaMaxFactor/np.var(Targets))))
+#                else:
+#                    # work-around zero-noise issue
+#                    if np.var(Targets) > 0:
+#                        beta = self.CONTROL_BetaMaxFactor/np.var(Targets)
+#                    else:
+#                        beta = self.CONTROL_BetaMaxFactor
+                
+                if not np.dot(e.T,e) == 0:
+                    beta = (N - np.sum(Gamma))/np.dot(e.T,e)
+                    # work-around zero-noise issue
+                    beta = np.min(np.vstack((beta,self.CONTROL_BetaMaxFactor/np.var(Targets))))
+                else:
+                    beta = self.CONTROL_BetaMaxFactor
+    
+                delta_log_beta = np.log(beta) - np.log(betaZ1)
+                
+                if np.abs(delta_log_beta) > self.CONTROL_MinDeltaLogBeta:
+                    print 'Update beta'
+    #                print BASIS,PHI,Targets,Used,Alpha,beta,Mu,BASIS_PHI,BASIS_Targets
+                    SIGMA,Mu,S_in,Q_in,S_out,Q_out,Factor,logML,Gamma,BASIS_B_PHI,beta = \
+                    self.full_statistics(BASIS,PHI,Targets,Used,Alpha,beta,BASIS_PHI,BASIS_Targets)
+                    full_count += 1
+    #                print SIGMA,Mu,S_in,Q_in,S_out,Q_out,Factor,logML,Gamma,BASIS_B_PHI,beta
+    #                print beta
+    #                print Factor
+                    if selected_Action == self.ACTION_TERMINATE:
+                        selected_Action = self.ACTION_NOISE_ONLY
             
             if selected_Action == self.ACTION_TERMINATE:
                 break
